@@ -1,0 +1,44 @@
+jobs:
+  build:
+    docker:
+    - image: docker:19.03.5
+    steps:
+    - checkout
+    - setup_remote_docker:
+        version: 18.09.3
+    - run:
+        command: DOCKER_BUILDKIT=1 docker build --progress=plain -t tritonmedia/downloader-go
+          -f Dockerfile .
+        name: Build "tritonmedia/downloader-go" Docker Image
+    - run:
+        command: echo "$DOCKER_PASSWORD" | docker login --username "${DOCKER_USERNAME}"
+          --password-stdin && docker push tritonmedia/downloader-go
+        name: Publish "tritonmedia/downloader-go" Docker Image
+  tests:
+    docker:
+    - image: circleci/golang:1.13
+    steps:
+    - checkout
+    - restore_cache:
+        key: go-deps-{{ checksum "go.sum" }}
+    - run:
+        command: go mod vendor
+        name: Fetch Dependencies
+    - run:
+        command: make test
+        name: Run Tests
+    - save_cache:
+        key: go-deps-{{ checksum "go.sum" }}
+        paths:
+        - /go/pkg/mod
+version: 2
+workflows:
+  build-push:
+    jobs:
+    - tests:
+        context: Docker
+    - build:
+        context: Docker
+        requires:
+        - tests
+  version: 2

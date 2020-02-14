@@ -1,0 +1,8 @@
+# go stuff
+vendor/
+
+# bins
+bin/
+
+# env vars
+.env
