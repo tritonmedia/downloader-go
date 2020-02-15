@@ -97,6 +97,9 @@ func main() {
 
 	<-ctx.Done()
 
+	// wait for the message processor to stop
+	<-msgs
+
 	// wait for shutdown
 	log.Info("finished shutdown")
 }
