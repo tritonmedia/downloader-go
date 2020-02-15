@@ -3,11 +3,11 @@ package rabbitmq
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 
 	log "github.com/sirupsen/logrus"
@@ -32,6 +32,12 @@ type Client struct {
 	// rk modification mutex
 	rkmutex sync.Mutex
 
+	// connection mutex for tracking the state of a connection
+	connmutex sync.Mutex
+
+	// endpoint of the rabbitmq instance
+	endpoint string
+
 	// prefetch
 	prefetch int64
 }
@@ -42,34 +48,58 @@ var (
 
 	// ErrorEnsureConsumerQueues is returned when consumer queues are unable to be created
 	ErrorEnsureConsumerQueues = errors.New("failed to ensure consumer queues")
+
+	// ErrorReconnecting is emitted when the channel is reconnecting
+	ErrorReconnecting = errors.New("processor is reconnecting")
+
+	// ErrorDied is emitted when a processor dies, with no hope of recovering
+	ErrorDied = errors.New("processor died")
 )
 
 // NewClient returns a new rabbitmq client
 func NewClient(ctx context.Context, endpoint string) (*Client, error) {
-	var conn *amqp.Connection
+	c := Client{
+		ctx:               ctx,
+		endpoint:          endpoint,
+		lastPublishRk:     make(map[string]int),
+		prefetch:          10,
+		numConsumerQueues: 2,
+	}
+
+	err := c.createConnection()
+
+	return &c, err
+}
+
+func (c *Client) createConnection() error {
+	// lock the mutex before we check the state, if we have a new valid connection
+	// we just no-op
+	c.connmutex.Lock()
+	if c.connection != nil {
+		if c.connection.IsClosed() {
+			c.connection.Close()
+		} else {
+			// refuse to modify a valid connection, instead it'll just use the valid one
+			return nil
+		}
+	}
+
 	// TODO(jaredallard): maybe give up at a certain point?
-	err := backoff.Retry(func() error {
+	_ = backoff.Retry(func() error {
 		var err error
 
-		fqendpoint := fmt.Sprintf("amqp://%s:%s@%s", os.Getenv("RABBITMQ_USERNAME"), os.Getenv("RABBITMQ_PASSWORD"), endpoint)
-		conn, err = amqp.Dial(fqendpoint)
+		fqendpoint := fmt.Sprintf("amqp://%s:%s@%s", os.Getenv("RABBITMQ_USERNAME"), os.Getenv("RABBITMQ_PASSWORD"), c.endpoint)
+		c.connection, err = amqp.Dial(fqendpoint)
 		if err != nil {
 			log.Errorf("failed to dial rabbitmq: %v", err)
 			return err
 		}
+
 		return nil
 	}, backoff.NewExponentialBackOff())
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to rabbitmq after substantial retries")
-	}
 
-	return &Client{
-		ctx:               ctx,
-		lastPublishRk:     make(map[string]int),
-		connection:        conn,
-		prefetch:          10,
-		numConsumerQueues: 2,
-	}, nil
+	c.connmutex.Unlock()
+	return nil
 }
 
 // ensureExchange ensures that your exchanges exists. Uses a separate channel
@@ -109,6 +139,13 @@ func (c *Client) ensureConsumerQueues(topic string) error {
 
 // getChannel creates a new channel
 func (c *Client) getChannel() (*amqp.Channel, error) {
+	// check the state of our connection
+	if c.connection.IsClosed() {
+		if err := c.createConnection(); err != nil {
+			return nil, err
+		}
+	}
+
 	channel, err := c.connection.Channel()
 	if channel != nil {
 		if err := channel.Qos(int(c.prefetch), 0, true); err != nil {
@@ -170,14 +207,68 @@ func (c *Client) Publish(topic string, body []byte) error {
 	return err
 }
 
-// Consume from a RabbitMQ queue
-func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
-	// TODO(jaredallard): handle channel disconnect
-	aChan, err := c.getChannel()
+// createProcessor creates a job processor on a given queue
+func (c *Client) createProcessor(
+	queue string,
+	multiplexer chan *Delivery, errChan chan error,
+	wg *sync.WaitGroup,
+) error {
+	rmqChan, err := c.getChannel()
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 
+	ch, err := rmqChan.Consume(queue, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	// pipe from this consumer into multiplexed channel
+	go func() {
+		for {
+			select {
+			// default, check if the connection has closed, otherwise we would have gotten
+			// a message and thus this block wouldn't have run
+			default:
+				if c.connection.IsClosed() {
+					// close the channel, we don't care about it anymore anyways
+					rmqChan.Close()
+
+					errChan <- fmt.Errorf("connection died")
+					err := c.createProcessor(queue, multiplexer, errChan, wg)
+					if err != nil {
+						errChan <- ErrorReconnecting
+						continue
+					}
+
+					errChan <- fmt.Errorf("processor '%s' reconnected", queue)
+
+					// we terminate because the new processor is taking over
+					return
+				}
+			case msg := <-ch:
+				d, err := NewDelivery(msg, rmqChan)
+				if err != nil {
+					errChan <- err
+					continue
+				}
+
+				// publish the message onto our "combined" queue
+				multiplexer <- d
+
+			case <-c.ctx.Done():
+				errChan <- ErrorDied
+				wg.Done()
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// Consume from a RabbitMQ queue
+func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
 	if err := c.ensureExchange(topic); err != nil {
 		return nil, nil, ErrorEnsureExchange
 	}
@@ -193,48 +284,22 @@ func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
 	wg.Add(c.numConsumerQueues)
 	for i := 0; i != c.numConsumerQueues; i++ {
 		queue := c.getRk(topic, i)
-		ch, err := aChan.Consume(queue, "", false, false, false, false, nil)
-		if err != nil {
-			return nil, nil, err
+		if err := c.createProcessor(queue, multiplexer, errChan, &wg); err != nil {
+			wg.Done()
+			return nil, nil, errors.Wrap(err, "failed to create initial processor")
 		}
-
-		// pipe from this consumer into multiplexed channel
-		go func() {
-			defer func() {
-				errChan <- fmt.Errorf("queue processor '%s' closed", queue)
-				wg.Done()
-			}()
-
-			for {
-				select {
-				case msg, ok := <-ch:
-					// channel has closed, we do nothing with this message, if we even have one
-					if !ok {
-						// TODO(jaredallard): when we lose all channels, i.e conn failure, this will trigger.
-						// find a better way to handle this
-						return
-					}
-
-					d, err := NewDelivery(msg, aChan)
-					if err != nil {
-						errChan <- err
-						continue
-					}
-
-					// publish the message onto our "combined" queue
-					multiplexer <- d
-
-				case <-c.ctx.Done():
-					return
-				}
-			}
-		}()
 	}
 
 	// wait for our processor threads to finish
+	// TODO(jaredallard): need to add logic to ensure that these are always running
 	go func() {
 		wg.Wait()
 		errChan <- fmt.Errorf("all threads closed")
+
+		// we ignore connection close errors ultimately
+		if err := c.connection.Close(); err != nil {
+			errChan <- err
+		}
 
 		// all the threads have closed, close our channels now
 		close(errChan)
