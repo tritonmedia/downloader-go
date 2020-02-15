@@ -247,7 +247,7 @@ func (c *Client) createProcessor(
 					return
 				}
 			case msg := <-ch:
-				d, err := NewDelivery(msg, rmqChan)
+				d, err := NewDelivery(c.ctx, msg, rmqChan)
 				if err != nil {
 					errChan <- err
 					continue

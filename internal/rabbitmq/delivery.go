@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"context"
 	"reflect"
 	"time"
 
@@ -21,10 +22,13 @@ type Delivery struct {
 
 	// Channel this message was recieved on
 	Channel *amqp.Channel
+
+	// Context is the context this delivery is running under
+	Context context.Context
 }
 
 // NewDelivery creates a delivery object
-func NewDelivery(delivery amqp.Delivery, channel *amqp.Channel) (*Delivery, error) {
+func NewDelivery(ctx context.Context, delivery amqp.Delivery, channel *amqp.Channel) (*Delivery, error) {
 	retryValue, ok := delivery.Headers["X-Retries"]
 	if !ok {
 		retryValue = int32(0)
@@ -42,9 +46,13 @@ func NewDelivery(delivery amqp.Delivery, channel *amqp.Channel) (*Delivery, erro
 		Metadata: DeliveryMetadata{
 			Retries: int(retries),
 		},
+		Context: ctx,
 		Channel: channel,
 	}, nil
 }
+
+// TODO(jaredallard): add support for queueing ack/nack/etc events in case
+// the rabbitmq instance has died
 
 // Ack acks the message
 func (d *Delivery) Ack() error {
