@@ -9,6 +9,7 @@ RUN apk add --no-cache git make bash
 COPY go.mod go.sum ./
 RUN go mod download
 
+# build the application
 COPY . /src/app
 RUN make CGO_ENABLED=0
 

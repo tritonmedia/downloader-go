@@ -4,11 +4,13 @@ package torrent
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -67,7 +69,11 @@ func (c *Client) Download(ctx context.Context, torrentURL string) error {
 		for {
 			select {
 			case <-progressReporter.C:
-				log.Info("checking torrent status")
+				completed := uint64(t.BytesCompleted())
+				total := uint64(t.Info().TotalLength())
+				log.
+					WithField("progress", math.Ceil((float64(completed)/float64(total)*100)*100)/100).
+					Infof("torrent status (%s/%s)", humanize.Bytes(completed), humanize.Bytes(total))
 			case <-stopChan:
 				log.Info("stopping progress reporter")
 				progressReporter.Stop()
