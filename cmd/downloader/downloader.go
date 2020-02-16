@@ -77,7 +77,7 @@ func main() {
 	// I'm ok with this
 	go func() {
 		for err := range errChan {
-			log.Errorf("failed to recieve message: %v", err)
+			log.Errorf("failed to receive message: %v", err)
 		}
 	}()
 

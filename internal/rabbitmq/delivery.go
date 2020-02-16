@@ -20,7 +20,7 @@ type Delivery struct {
 	// Delivery is the internal amqp delivery struct
 	Delivery amqp.Delivery
 
-	// Channel this message was recieved on
+	// Channel this message was received on
 	Channel *amqp.Channel
 
 	// Context is the context this delivery is running under
