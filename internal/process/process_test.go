@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestProcessDir(t *testing.T) {
+func TestDir(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	testdataDir := filepath.Join(filepath.Dir(filename), "testdata")
 	type args struct {
@@ -42,13 +42,13 @@ func TestProcessDir(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ProcessDir(tt.args.path)
+			got, err := Dir(tt.args.path)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ProcessDir() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Dir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ProcessDir() = %v, want %v", got, tt.want)
+				t.Errorf("Dir() = %v, want %v", got, tt.want)
 			}
 		})
 	}

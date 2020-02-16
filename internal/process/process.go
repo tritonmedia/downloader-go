@@ -18,10 +18,11 @@ var mediaExts = map[string]bool{
 	".webm": true,
 }
 
-// TODO(jaredallard): add filtering dirs we "enter"
-// ProcessDir finds media files in a dir and returns their paths
-func ProcessDir(path string) ([]string, error) {
+// Dir finds media files in a dir and returns their paths
+func Dir(path string) ([]string, error) {
 	files := []string{}
+
+	// TODO(jaredallard): add filtering dirs we "enter"
 	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
 		// skip directories
 		if info.IsDir() {
