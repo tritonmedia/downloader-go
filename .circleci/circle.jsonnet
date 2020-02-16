@@ -18,8 +18,10 @@ circle.ServiceConfig('downloader-go') {
         'tests', 
         {
           name:: 'build',
-          branches: {
-            only: ['master'],
+          filters: {
+            branches: {
+              only: ['master'],
+            },
           },
           requires: ['tests'],
         }

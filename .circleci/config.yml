@@ -38,10 +38,11 @@ workflows:
     - tests:
         context: Docker
     - build:
-        branches:
-          only:
-          - master
         context: Docker
+        filters:
+          branches:
+            only:
+            - master
         requires:
         - tests
   version: 2
