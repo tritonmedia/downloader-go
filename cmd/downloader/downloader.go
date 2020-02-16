@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/minio/minio-go/v6"
 	log "github.com/sirupsen/logrus"
+	"github.com/tritonmedia/downloader-go/internal/downloader/torrent"
 	"github.com/tritonmedia/downloader-go/internal/rabbitmq"
+	api "github.com/tritonmedia/tritonmedia.go/pkg/proto"
 )
 
 func main() {
@@ -78,11 +81,36 @@ func main() {
 		}
 	}()
 
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tclient := torrent.NewClient(filepath.Join(wd, "downloading"))
+
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
 	go func() {
 		for msg := range msgs {
-			fmt.Println(msg)
+			var job api.Download
+			if err := proto.Unmarshal(msg.Delivery.Body, &job); err != nil {
+				log.WithField("event", "decode-message").Errorf("failed to unmarshal rabbitmq message into protobuf format: %v", err)
+				if err := msg.Nack(); err != nil {
+					log.Warnf("failed to nack failed message: %v", err)
+				}
+				continue
+			}
+
+			log.WithField("job", job).Infof("got message")
+			if job.Media.Source == api.Media_TORRENT {
+				log.Info("started torrent downloader")
+				if err := tclient.Download(ctx, job.Media.SourceURI); err != nil {
+					log.Errorf("failed to download torrent: %v", err)
+					continue
+				}
+			}
+			log.Info("finished download")
+
 		}
 	}()
 
@@ -95,6 +123,7 @@ func main() {
 		cancel()
 	}()
 
+	// wait for context to be signified as done
 	<-ctx.Done()
 
 	// wait for the message processor to stop

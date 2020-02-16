@@ -6,3 +6,8 @@ bin/
 
 # env vars
 .env
+
+# downloading dir used for testing
+downloading/
+
+.DS_Store
