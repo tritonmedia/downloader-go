@@ -38,6 +38,9 @@ workflows:
     - tests:
         context: Docker
     - build:
+        branches:
+          only:
+          - master
         context: Docker
         requires:
         - tests
