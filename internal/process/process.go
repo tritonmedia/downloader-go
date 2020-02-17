@@ -34,7 +34,7 @@ func Dir(path string) ([]string, error) {
 
 	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
 		// skip directories, unless they are allowed
-		if info.IsDir() {
+		if info.IsDir() && file != path {
 			dirName := filepath.Base(file)
 			for _, dir := range allowedDirs {
 				// returning nil here makes us process the contents
