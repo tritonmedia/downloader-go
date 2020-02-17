@@ -6,6 +6,8 @@ package process
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // TODO(jaredallard): running files through ffprobe is likely to end up
@@ -18,15 +20,36 @@ var mediaExts = map[string]bool{
 	".webm": true,
 }
 
+var allowedDirs = []string{
+	"season",
+}
+
+var allowedDirsRegex = []*regexp.Regexp{
+	regexp.MustCompile(`s\d+`),
+}
+
 // Dir finds media files in a dir and returns their paths
 func Dir(path string) ([]string, error) {
 	files := []string{}
 
-	// TODO(jaredallard): add filtering dirs we "enter"
 	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
-		// skip directories
+		// skip directories, unless they are allowed
 		if info.IsDir() {
-			return nil
+			dirName := filepath.Base(file)
+			for _, dir := range allowedDirs {
+				// returning nil here makes us process the contents
+				if strings.Contains(dirName, dir) {
+					return nil
+				}
+			}
+
+			// process regex filters
+			for _, regex := range allowedDirsRegex {
+				if regex.MatchString(dirName) {
+					return nil
+				}
+			}
+			return filepath.SkipDir
 		}
 
 		// walk had an error :( so we die
