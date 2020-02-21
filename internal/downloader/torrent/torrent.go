@@ -13,6 +13,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/tritonmedia/downloader-go/internal/downloader"
 )
 
 type Client struct {
@@ -28,8 +29,21 @@ func NewClient(baseDir string) *Client {
 	}
 }
 
-func (c *Client) Download(ctx context.Context, torrentURL string) error {
+// Register is called to register this implementation for a protocol
+func (c *Client) Register() downloader.ClientRegister {
+	return downloader.ClientRegister{
+		Name: "torrent",
+		Protocols: []string{
+			"magnet",
+		},
+		FileExtensions: []string{
+			".torrent",
+		},
+	}
+}
 
+// Download downloads a torrent
+func (c *Client) Download(ctx context.Context, torrentURL string) error {
 	// create a new client everytime to prevent state leakage
 	client, err := torrent.NewClient(c.config)
 	if err != nil {
