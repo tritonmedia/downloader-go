@@ -16,12 +16,9 @@ jobs:
         name: Publish "tritonmedia/downloader-go" Docker Image
   tests:
     docker:
-    - image: circleci/golang:1.13
+    - image: tritonmedia/testbed
     steps:
     - checkout
-    - run:
-        command: apt-get install -y jsonnet jq && pip install yq
-        name: Install Pre-reqs
     - restore_cache:
         key: go-deps-{{ checksum "go.sum" }}
     - run:

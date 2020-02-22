@@ -2,10 +2,9 @@ local circle = import 'circle.libsonnet';
 
 circle.ServiceConfig('downloader-go') {
   jobs+: {
-    tests: circle.Job(dockerImage='circleci/golang:1.13', withDocker=false) {
+    tests: circle.Job(dockerImage='tritonmedia/testbed', withDocker=false) {
       steps_+:: [
         // TODO(jaredallard): make our own image
-        circle.RunStep('Install Pre-reqs', 'apt-get install -y jsonnet jq && pip install yq'),
         circle.RestoreCacheStep('go-deps-{{ checksum "go.sum" }}'),
         circle.RunStep('Fetch Dependencies', 'go mod vendor'),
         circle.RunStep('Run Tests', 'make test'),
