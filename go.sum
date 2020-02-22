@@ -75,8 +75,6 @@ github.com/anacrolix/torrent v0.0.0-20180622074351-fefeef4ee9eb/go.mod h1:3vcFVx
 github.com/anacrolix/torrent v1.7.1/go.mod h1:uvOcdpOjjrAq3uMP/u1Ide35f6MJ/o8kMnFG8LV3y6g=
 github.com/anacrolix/torrent v1.9.0/go.mod h1:jJJ6lsd2LD1eLHkUwFOhy7I0FcLYH0tHKw2K7ZYMHCs=
 github.com/anacrolix/torrent v1.11.0/go.mod h1:FwBai7SyOFlflvfEOaM88ag/jjcBWxTOqD6dVU/lKKA=
-github.com/anacrolix/torrent v1.13.0 h1:dhdmSHyax1TziGr5v+UGvUF1KUC5YGkAKtkW6AwakfA=
-github.com/anacrolix/torrent v1.13.0/go.mod h1:vCkQMgViw2b6GbrTECqql4o2AZCCPujZaq3iEYnH0p4=
 github.com/anacrolix/torrent v1.14.0 h1:EgiHHTyYA4ftvO2J9ASRmG0PqRLdh/0no6huXZlHgH4=
 github.com/anacrolix/torrent v1.14.0/go.mod h1:WMUEdKuySEk/A0HKb9nVOg7fdD5bcvv7ODulypguwdc=
 github.com/anacrolix/upnp v0.1.1 h1:v5C+wBiku2zmwFR5B+pUfdNBL5TfPtyO+sWuw+/VEDg=
@@ -185,8 +183,6 @@ github.com/mattn/go-sqlite3 v1.13.0/go.mod h1:FPy6KqzDD04eiIsT53CuJW3U88zkxoIYsO
 github.com/mattn/go-sqlite3 v2.0.2+incompatible h1:qzw9c2GNT8UFrgWNDhCTqRqYUSmu/Dav/9Z58LGpk7U=
 github.com/mattn/go-sqlite3 v2.0.2+incompatible/go.mod h1:FPy6KqzDD04eiIsT53CuJW3U88zkxoIYsOqkbpncsNc=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
-github.com/minio/minio-go/v6 v6.0.48 h1:KnJkunjRWVYGHVKtIcbyUKEYw1yA6B/d19HOssr6HDE=
-github.com/minio/minio-go/v6 v6.0.48/go.mod h1:qD0lajrGW49lKZLtXKtCB4X/qkMf0a5tBvN2PaZg7Gg=
 github.com/minio/minio-go/v6 v6.0.49 h1:bU4kIa/qChTLC1jrWZ8F+8gOiw1MClubddAJVR4gW3w=
 github.com/minio/minio-go/v6 v6.0.49/go.mod h1:qD0lajrGW49lKZLtXKtCB4X/qkMf0a5tBvN2PaZg7Gg=
 github.com/minio/sha256-simd v0.1.1 h1:5QHSlgo3nt5yKOJrC7W8w7X+NFl8cMPZm96iu8kKUJU=

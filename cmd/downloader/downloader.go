@@ -87,7 +87,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	downloader := downloader.NewClient([]downloader.ClientImpl{torrent.NewClient(filepath.Join(wd, "downloading"))})
+	downloader := downloader.NewClient(ctx, []downloader.ClientImpl{torrent.NewClient(filepath.Join(wd, "downloading"))})
 
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
