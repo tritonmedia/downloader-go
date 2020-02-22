@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # Checks if go.sum / go.mod would be modified by a go mod tidy step
+set -e
 
 go mod tidy
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # Checks if circle config was updated or not
+set -e
 
 make render-circle
 
