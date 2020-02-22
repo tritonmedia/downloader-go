@@ -25,7 +25,7 @@ jobs:
         command: go mod vendor
         name: Fetch Dependencies
     - run:
-        command: make test
+        command: make CGO_ENABLED=0 test
         name: Run Tests
     - run:
         command: ./hack/verify-go-mod.sh
