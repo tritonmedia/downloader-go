@@ -19,6 +19,9 @@ jobs:
     - image: circleci/golang:1.13
     steps:
     - checkout
+    - run:
+        command: apt-get install -y jsonnet jq && pip install yq
+        name: Install Pre-reqs
     - restore_cache:
         key: go-deps-{{ checksum "go.sum" }}
     - run:
