@@ -27,6 +27,12 @@ jobs:
     - run:
         command: make test
         name: Run Tests
+    - run:
+        command: ./hack/verify-go-mod.sh
+        name: Verify Go Modules
+    - run:
+        command: ./hack/verify-circleci.sh
+        name: Verify CircleCI Configuration
     - save_cache:
         key: go-deps-{{ checksum "go.sum" }}
         paths:
