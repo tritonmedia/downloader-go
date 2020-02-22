@@ -12,6 +12,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/minio/minio-go/v6"
 	log "github.com/sirupsen/logrus"
+	"github.com/tritonmedia/downloader-go/internal/downloader"
 	"github.com/tritonmedia/downloader-go/internal/downloader/torrent"
 	"github.com/tritonmedia/downloader-go/internal/rabbitmq"
 	api "github.com/tritonmedia/tritonmedia.go/pkg/proto"
@@ -86,7 +87,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tclient := torrent.NewClient(filepath.Join(wd, "downloading"))
+	downloader := downloader.NewClient(ctx, []downloader.ClientImpl{torrent.NewClient(filepath.Join(wd, "downloading"))})
 
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
@@ -104,7 +105,7 @@ func main() {
 			log.WithField("job", job).Infof("got message")
 			if job.Media.Source == api.Media_TORRENT {
 				log.Info("started torrent downloader")
-				if err := tclient.Download(ctx, job.Media.SourceURI); err != nil {
+				if err := downloader.Download(ctx, job.Media.SourceURI); err != nil {
 					log.Errorf("failed to download torrent: %v", err)
 					continue
 				}
