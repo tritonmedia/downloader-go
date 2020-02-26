@@ -89,10 +89,13 @@ func main() {
 	}
 
 	dlDir := filepath.Join(wd, "downloading")
-	downloader := downloader.NewClient(ctx, []downloader.ClientImpl{
-		torrent.NewClient(dlDir),
-		http.NewClient(dlDir),
+	downloader, err := downloader.NewClient(ctx, dlDir, []downloader.ClientImpl{
+		torrent.NewClient(),
+		http.NewClient(),
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
@@ -109,7 +112,7 @@ func main() {
 
 			log.WithField("job", job).Infof("got message")
 
-			if err := downloader.Download(ctx, job.Media.SourceURI); err != nil {
+			if err := downloader.Download(ctx, job.Media.Id, job.Media.SourceURI); err != nil {
 				log.Errorf("failed to download torrent: %v", err)
 				continue
 			}

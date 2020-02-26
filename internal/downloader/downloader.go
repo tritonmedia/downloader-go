@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 // ClientImpl is a downloader implementation
 type ClientImpl interface {
 	// Download downloads a file into a specific location
-	Download(ctx context.Context, progress chan ProgressUpdate, url string) error
+	Download(ctx context.Context, baseDir string, progress chan ProgressUpdate, url string) error
 
 	// Register is used for the client, and returns what protocols / file extensions
 	// this downloader supports
@@ -43,6 +44,10 @@ type Client struct {
 	protocolImpl map[string][]ClientImpl
 	fileExtsImpl map[string][]ClientImpl
 
+	// baseDir to download all things into, will follow format like such:
+	// baseDir/jobId/...
+	baseDir string
+
 	// used to store, and track, the progress of downloads
 	progress        map[string]float64
 	progressUpdates chan ProgressUpdate
@@ -56,12 +61,17 @@ type ProgressUpdate struct {
 }
 
 // NewClient creates a new client
-func NewClient(ctx context.Context, impls []ClientImpl) *Client {
+func NewClient(ctx context.Context, baseDir string, impls []ClientImpl) (*Client, error) {
 	c := &Client{
 		protocolImpl:    make(map[string][]ClientImpl),
+		baseDir:         baseDir,
 		fileExtsImpl:    make(map[string][]ClientImpl),
 		progress:        make(map[string]float64),
 		progressUpdates: make(chan ProgressUpdate),
+	}
+
+	if c.baseDir == "" || !filepath.IsAbs(c.baseDir) {
+		return nil, fmt.Errorf("invalid baseDir")
 	}
 
 	for _, impl := range impls {
@@ -87,6 +97,12 @@ func NewClient(ctx context.Context, impls []ClientImpl) *Client {
 		for {
 			select {
 			case p := <-c.progressUpdates:
+				// remove an item once it hits 100
+				if p.Progress == 100 {
+					delete(c.progress, p.URL)
+					continue
+				}
+
 				c.progress[p.URL] = p.Progress
 			case <-ctx.Done():
 				close(c.progressUpdates)
@@ -115,11 +131,11 @@ func NewClient(ctx context.Context, impls []ClientImpl) *Client {
 
 	log.Infof("have %d protocol(s), and %d file extension(s) registered", len(c.protocolImpl), len(c.fileExtsImpl))
 
-	return c
+	return c, nil
 }
 
 // Download downloads media into a given location
-func (c *Client) Download(ctx context.Context, furl string) error {
+func (c *Client) Download(ctx context.Context, id string, furl string) error {
 	u, err := url.Parse(furl)
 	if err != nil {
 		return err
@@ -151,5 +167,10 @@ func (c *Client) Download(ctx context.Context, furl string) error {
 		return fmt.Errorf("unsupported fileext '%s' or protocol '%s'", fileext, u.Scheme)
 	}
 
-	return downloader.Download(ctx, c.progressUpdates, furl)
+	baseDir := filepath.Join(c.baseDir, id)
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		return err
+	}
+
+	return downloader.Download(ctx, baseDir, c.progressUpdates, furl)
 }

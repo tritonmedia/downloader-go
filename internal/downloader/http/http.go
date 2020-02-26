@@ -10,15 +10,13 @@ import (
 )
 
 type Client struct {
-	client  *grab.Client
-	baseDir string
+	client *grab.Client
 }
 
 // NewClient creates a new http client
-func NewClient(baseDir string) *Client {
+func NewClient() *Client {
 	return &Client{
-		client:  grab.NewClient(),
-		baseDir: baseDir,
+		client: grab.NewClient(),
 	}
 }
 
@@ -34,8 +32,8 @@ func (c *Client) Register() downloader.ClientRegister {
 }
 
 // Download downloads a torrent
-func (c *Client) Download(ctx context.Context, progress chan downloader.ProgressUpdate, furl string) error {
-	req, err := grab.NewRequest(c.baseDir, furl)
+func (c *Client) Download(ctx context.Context, baseDir string, progress chan downloader.ProgressUpdate, furl string) error {
+	req, err := grab.NewRequest(baseDir, furl)
 	if err != nil {
 		return err
 	}
