@@ -65,10 +65,17 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 		return fmt.Errorf("unsupported scheme '%s'", u.Scheme)
 	}
 
-	// TODO(jaredallard): add a timeout condition for stuck magnet URLs
 	log.Infof("fetching torrent metadata")
-	<-t.GotInfo()
-	log.Infof("fetched torrent metadata")
+	timeout := time.After(10 * time.Minute)
+	select {
+	case <-t.GotInfo():
+		log.Infof("fetched torrent metadata")
+	case <-timeout:
+		return fmt.Errorf("failed to get metadata")
+	case <-ctx.Done():
+		// we're dying instead
+		return ctx.Err()
+	}
 
 	// download all files in the torrent
 	t.DownloadAll()
@@ -76,6 +83,8 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 	// publish the progress every 1 second
 	stopChan := make(chan bool)
 	progressReporter := time.NewTicker(1 * time.Second)
+
+	defer progressReporter.Stop()
 	go func() {
 		for {
 			select {
@@ -88,13 +97,13 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 				}
 			case <-stopChan:
 				log.Info("stopping progress reporter")
-				progressReporter.Stop()
 				return
 			}
 		}
 	}()
 
 	// wait for the torrent to finish downloading
+	// TODO(jaredallard): extend context cancellation into here
 	log.Infof("waiting for torrent download")
 	if !client.WaitAll() {
 		return fmt.Errorf("failed to download torrents")

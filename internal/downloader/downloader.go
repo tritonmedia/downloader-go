@@ -104,7 +104,7 @@ func NewClient(ctx context.Context, impls []ClientImpl) *Client {
 				for url, progress := range c.progress {
 					log.
 						WithFields(log.Fields{"progress": math.Ceil(progress*100) / 100, "url": url}).
-						Infof("torrent status")
+						Infof("download status")
 				}
 			case <-ctx.Done():
 				updateTicker.Stop()
