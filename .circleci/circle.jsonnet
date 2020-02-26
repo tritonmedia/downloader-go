@@ -1,7 +1,13 @@
 local circle = import 'circle.libsonnet';
+local name = 'downloader-go';
 
-circle.ServiceConfig('downloader-go') {
+circle.ServiceConfig(name) {
   jobs+: {
+    ['test-docker-build']: circle.Job() {
+      steps_+:: [
+        circle.BuildDockerImageStep(name),
+      ],
+    },
     tests: circle.Job(dockerImage='tritonmedia/testbed', withDocker=false) {
       steps_+:: [
         // TODO(jaredallard): make our own image
@@ -18,7 +24,8 @@ circle.ServiceConfig('downloader-go') {
   workflows+: {
     ['build-push']+: {
       jobs_:: [
-        'tests', 
+        'tests',
+        'test-docker-build',
         {
           name:: 'build',
           filters: {
@@ -26,7 +33,7 @@ circle.ServiceConfig('downloader-go') {
               only: ['master'],
             },
           },
-          requires: ['tests'],
+          requires: ['tests', 'test-docker-build'],
         }
       ],
     },

@@ -14,6 +14,17 @@ jobs:
         command: echo "$DOCKER_PASSWORD" | docker login --username "${DOCKER_USERNAME}"
           --password-stdin && docker push tritonmedia/downloader-go
         name: Publish "tritonmedia/downloader-go" Docker Image
+  test-docker-build:
+    docker:
+    - image: docker:19.03.6
+    steps:
+    - checkout
+    - setup_remote_docker:
+        version: 18.09.3
+    - run:
+        command: DOCKER_BUILDKIT=1 docker build --progress=plain -t downloader-go
+          -f Dockerfile .
+        name: Build "downloader-go" Docker Image
   tests:
     docker:
     - image: tritonmedia/testbed
@@ -43,6 +54,8 @@ workflows:
     jobs:
     - tests:
         context: Docker
+    - test-docker-build:
+        context: Docker
     - build:
         context: Docker
         filters:
@@ -51,4 +64,5 @@ workflows:
             - master
         requires:
         - tests
+        - test-docker-build
   version: 2
