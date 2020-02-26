@@ -14,6 +14,7 @@ import (
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 )
 
+// Client is a Torrent downloader
 type Client struct{}
 
 // NewClient creates a new torrent client

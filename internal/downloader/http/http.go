@@ -9,6 +9,7 @@ import (
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 )
 
+// Client is a HTTP downloader
 type Client struct {
 	client *grab.Client
 }
