@@ -257,7 +257,7 @@ func (c *Client) createProcessor(
 				multiplexer <- d
 
 			case <-c.ctx.Done():
-				errChan <- ErrorDied
+				errChan <- c.ctx.Err()
 				wg.Done()
 				return
 			}
@@ -294,7 +294,6 @@ func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
 	// TODO(jaredallard): need to add logic to ensure that these are always running
 	go func() {
 		wg.Wait()
-		errChan <- fmt.Errorf("all threads closed")
 
 		// we ignore connection close errors ultimately
 		if err := c.connection.Close(); err != nil {

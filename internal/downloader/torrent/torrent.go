@@ -14,17 +14,12 @@ import (
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 )
 
-type Client struct {
-	config *torrent.ClientConfig
-}
+// Client is a Torrent downloader
+type Client struct{}
 
 // NewClient creates a new torrent client
-func NewClient(baseDir string) *Client {
-	clientConfig := torrent.NewDefaultClientConfig()
-	clientConfig.DefaultStorage = storage.NewFile(baseDir)
-	return &Client{
-		config: clientConfig,
-	}
+func NewClient() *Client {
+	return &Client{}
 }
 
 // Register is called to register this implementation for a protocol
@@ -41,9 +36,12 @@ func (c *Client) Register() downloader.ClientRegister {
 }
 
 // Download downloads a torrent
-func (c *Client) Download(ctx context.Context, progress chan downloader.ProgressUpdate, torrentURL string) error {
+func (c *Client) Download(ctx context.Context, baseDir string, progress chan downloader.ProgressUpdate, torrentURL string) error {
+	clientConfig := torrent.NewDefaultClientConfig()
+	clientConfig.DefaultStorage = storage.NewFile(baseDir)
+
 	// create a new client everytime to prevent state leakage
-	client, err := torrent.NewClient(c.config)
+	client, err := torrent.NewClient(clientConfig)
 	if err != nil {
 		return err
 	}
@@ -65,10 +63,17 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 		return fmt.Errorf("unsupported scheme '%s'", u.Scheme)
 	}
 
-	// TODO(jaredallard): add a timeout condition for stuck magnet URLs
 	log.Infof("fetching torrent metadata")
-	<-t.GotInfo()
-	log.Infof("fetched torrent metadata")
+	timeout := time.After(10 * time.Minute)
+	select {
+	case <-t.GotInfo():
+		log.Infof("fetched torrent metadata")
+	case <-timeout:
+		return fmt.Errorf("failed to get metadata")
+	case <-ctx.Done():
+		// we're dying instead
+		return ctx.Err()
+	}
 
 	// download all files in the torrent
 	t.DownloadAll()
@@ -76,6 +81,8 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 	// publish the progress every 1 second
 	stopChan := make(chan bool)
 	progressReporter := time.NewTicker(1 * time.Second)
+
+	defer progressReporter.Stop()
 	go func() {
 		for {
 			select {
@@ -88,16 +95,21 @@ func (c *Client) Download(ctx context.Context, progress chan downloader.Progress
 				}
 			case <-stopChan:
 				log.Info("stopping progress reporter")
-				progressReporter.Stop()
 				return
 			}
 		}
 	}()
 
 	// wait for the torrent to finish downloading
+	// TODO(jaredallard): extend context cancellation into here
 	log.Infof("waiting for torrent download")
 	if !client.WaitAll() {
 		return fmt.Errorf("failed to download torrents")
+	}
+
+	progress <- downloader.ProgressUpdate{
+		Progress: 100,
+		URL:      torrentURL,
 	}
 
 	close(stopChan)
