@@ -1,7 +1,7 @@
 jobs:
   build:
     docker:
-    - image: docker:19.03.6
+    - image: docker:19.03.7
     steps:
     - checkout
     - setup_remote_docker:
@@ -16,7 +16,7 @@ jobs:
         name: Publish "tritonmedia/downloader-go" Docker Image
   test-docker-build:
     docker:
-    - image: docker:19.03.6
+    - image: docker:19.03.7
     steps:
     - checkout
     - setup_remote_docker:
