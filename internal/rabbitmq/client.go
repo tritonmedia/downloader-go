@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
@@ -75,6 +76,8 @@ func (c *Client) createConnection() error {
 	// lock the mutex before we check the state, if we have a new valid connection
 	// we just no-op
 	c.connmutex.Lock()
+	defer c.connmutex.Unlock()
+
 	if c.connection != nil {
 		if c.connection.IsClosed() {
 			c.connection.Close()
@@ -97,8 +100,6 @@ func (c *Client) createConnection() error {
 
 		return nil
 	}, backoff.NewExponentialBackOff())
-
-	c.connmutex.Unlock()
 	return nil
 }
 
@@ -140,10 +141,8 @@ func (c *Client) ensureConsumerQueues(topic string) error {
 // getChannel creates a new channel
 func (c *Client) getChannel() (*amqp.Channel, error) {
 	// check the state of our connection
-	if c.connection.IsClosed() {
-		if err := c.createConnection(); err != nil {
-			return nil, err
-		}
+	if err := c.createConnection(); err != nil {
+		return nil, err
 	}
 
 	channel, err := c.connection.Channel()
@@ -172,7 +171,6 @@ func (c *Client) SetPrefetch(prefetch int64) {
 
 // Publish a message to an exchange, must be a serialized format
 func (c *Client) Publish(topic string, body []byte) error {
-	// TODO(jaredallard): consolidate to using one active channel?
 	aChan, err := c.getChannel()
 	if err != nil {
 		return err
@@ -223,14 +221,18 @@ func (c *Client) createProcessor(
 		return err
 	}
 
+	tick := time.NewTicker(5 * time.Second)
+
 	// pipe from this consumer into multiplexed channel
 	go func() {
 		for {
 			select {
-			// default, check if the connection has closed, otherwise we would have gotten
-			// a message and thus this block wouldn't have run
-			default:
+			// TODO(jaredallard): refactor this to have a single connection "watcher"
+			// doing one per processor has required crazy mutex logic
+			case <-tick.C:
+				c.connmutex.Lock()
 				if c.connection.IsClosed() {
+					c.connmutex.Unlock()
 					// close the channel, we don't care about it anymore anyways
 					rmqChan.Close()
 
@@ -244,9 +246,18 @@ func (c *Client) createProcessor(
 					errChan <- fmt.Errorf("processor '%s' reconnected", queue)
 
 					// we terminate because the new processor is taking over
+					tick.Stop()
 					return
+				} else {
+					c.connmutex.Unlock()
 				}
 			case msg := <-ch:
+				log.Infof("got message %v", msg)
+				// skip invalid messages, i.e bad data
+				if msg.Body == nil {
+					continue
+				}
+
 				d, err := NewDelivery(c.ctx, msg, rmqChan)
 				if err != nil {
 					errChan <- err
@@ -258,6 +269,7 @@ func (c *Client) createProcessor(
 
 			case <-c.ctx.Done():
 				errChan <- c.ctx.Err()
+				tick.Stop()
 				wg.Done()
 				return
 			}
