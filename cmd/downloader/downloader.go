@@ -13,12 +13,14 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/minio/minio-go/v6"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 	"github.com/tritonmedia/downloader-go/internal/downloader/http"
 	"github.com/tritonmedia/downloader-go/internal/downloader/torrent"
 	"github.com/tritonmedia/downloader-go/internal/process"
 	"github.com/tritonmedia/downloader-go/internal/rabbitmq"
+	"github.com/tritonmedia/downloader-go/internal/uploader"
 	api "github.com/tritonmedia/tritonmedia.go/pkg/proto"
 )
 
@@ -116,6 +118,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	uploader, err := uploader.NewUploader("triton-staging")
+	if err != nil {
+		log.Fatal(errors.Wrap(err, "failed to create uploader"))
+	}
+
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
 	go func() {
@@ -145,7 +152,13 @@ func main() {
 
 			log.Infof("found %d files", len(files))
 
-			log.Info("finished download")
+			if err := uploader.UploadFiles(ctx, job.Media.Id, dlDir, files); err != nil {
+				log.Errorf("failed to upload media files: %v", err)
+				continue
+			}
+
+			log.WithField("job", job).Infof("finished processing")
+			msg.Ack()
 		}
 	}()
 
