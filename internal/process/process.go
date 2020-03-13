@@ -4,6 +4,7 @@
 package process
 
 import (
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,11 +33,29 @@ var allowedDirsRegex = []*regexp.Regexp{
 func Dir(path string) ([]string, error) {
 	files := []string{}
 
-	err := filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
+	topLevelFiles, err := ioutil.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+
+	topLevelDirs := make([]string, 0)
+	allowed := allowedDirs
+	for _, f := range topLevelFiles {
+		if f.IsDir() {
+			topLevelDirs = append(topLevelDirs, f.Name())
+		}
+	}
+
+	// if we found one top-level directory, then we'll process it
+	if len(topLevelDirs) == 1 {
+		allowed = append(allowed, topLevelDirs...)
+	}
+
+	err = filepath.Walk(path, func(file string, info os.FileInfo, err error) error {
 		// skip directories, unless they are allowed
 		if info.IsDir() && file != path {
 			dirName := filepath.Base(file)
-			for _, dir := range allowedDirs {
+			for _, dir := range allowed {
 				// returning nil here makes us process the contents
 				if strings.Contains(dirName, dir) {
 					return nil
