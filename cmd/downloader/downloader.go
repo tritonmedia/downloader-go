@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 
@@ -15,12 +17,29 @@ import (
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 	"github.com/tritonmedia/downloader-go/internal/downloader/http"
 	"github.com/tritonmedia/downloader-go/internal/downloader/torrent"
+	"github.com/tritonmedia/downloader-go/internal/process"
 	"github.com/tritonmedia/downloader-go/internal/rabbitmq"
 	api "github.com/tritonmedia/tritonmedia.go/pkg/proto"
 )
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Warnf("failed to create cpu profile file: %v", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Warnf("failed to start cpu profiling: %v", err)
+		} else {
+			log.Info("started cpu profiler")
+			defer pprof.StopCPUProfile()
+		}
+	}
 
 	if strings.ToLower(os.Getenv("LOG_LEVEL")) == "debug" {
 		log.SetReportCaller(true)
@@ -112,10 +131,19 @@ func main() {
 
 			log.WithField("job", job).Infof("got message")
 
-			if err := downloader.Download(ctx, job.Media.Id, job.Media.SourceURI); err != nil {
+			dlDir, err := downloader.Download(ctx, job.Media.Id, job.Media.SourceURI)
+			if err != nil {
 				log.Errorf("failed to download torrent: %v", err)
 				continue
 			}
+
+			files, err := process.Dir(dlDir)
+			if err != nil {
+				log.Errorf("failed to find media files: %v", err)
+				continue
+			}
+
+			log.Infof("found %d files", len(files))
 
 			log.Info("finished download")
 		}
