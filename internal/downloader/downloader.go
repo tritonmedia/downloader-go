@@ -135,10 +135,10 @@ func NewClient(ctx context.Context, baseDir string, impls []ClientImpl) (*Client
 }
 
 // Download downloads media into a given location
-func (c *Client) Download(ctx context.Context, id string, furl string) error {
+func (c *Client) Download(ctx context.Context, id string, furl string) (string, error) {
 	u, err := url.Parse(furl)
 	if err != nil {
-		return err
+		return "", err
 	}
 	fileext := filepath.Ext(u.Path)
 
@@ -164,13 +164,13 @@ func (c *Client) Download(ctx context.Context, id string, furl string) error {
 
 	// if it's still nil here, we didn't find a downloader
 	if downloader == nil {
-		return fmt.Errorf("unsupported fileext '%s' or protocol '%s'", fileext, u.Scheme)
+		return "", fmt.Errorf("unsupported fileext '%s' or protocol '%s'", fileext, u.Scheme)
 	}
 
 	baseDir := filepath.Join(c.baseDir, id)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return err
+		return "", err
 	}
 
-	return downloader.Download(ctx, baseDir, c.progressUpdates, furl)
+	return baseDir, downloader.Download(ctx, baseDir, c.progressUpdates, furl)
 }

@@ -61,6 +61,11 @@ LOOP:
 		}
 	}
 
+	progress <- downloader.ProgressUpdate{
+		Progress: 100,
+		URL:      furl,
+	}
+
 	// we're done :tada:
 	return nil
 }
