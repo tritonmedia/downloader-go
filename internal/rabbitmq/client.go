@@ -30,11 +30,25 @@ type Client struct {
 	// to publish to <string> queue
 	lastPublishRk map[string]int
 
+	// workerContext is used to keep track of the worker threads and terminate
+	// them as needed
+	workerContext context.Context
+
+	workerMultiplexer map[string]chan *Delivery
+
+	// workerThreads is the number of desired worker threads
+	// map[queueName]numberOfWorkers
+	workerThreads map[string]int
+
+	// actualThreads is the number of actual threads
+	// map[queueName]numberOfWorkers
+	actualThreads map[string]int
+
+	// used to signify to external callers that we're done
+	done context.Context
+
 	// rk modification mutex
 	rkmutex sync.Mutex
-
-	// connection mutex for tracking the state of a connection
-	connmutex sync.Mutex
 
 	// endpoint of the rabbitmq instance
 	endpoint string
@@ -59,36 +73,149 @@ var (
 
 // NewClient returns a new rabbitmq client
 func NewClient(ctx context.Context, endpoint string) (*Client, error) {
+	workerContext, cancel := context.WithCancel(ctx)
+	ourContext, ourCancel := context.WithCancel(context.Background())
 	c := Client{
 		ctx:               ctx,
 		endpoint:          endpoint,
 		lastPublishRk:     make(map[string]int),
+		workerThreads:     make(map[string]int),
+		workerContext:     workerContext,
+		actualThreads:     make(map[string]int),
+		done:              ourContext,
+		workerMultiplexer: make(map[string]chan *Delivery),
 		prefetch:          10,
 		numConsumerQueues: 2,
 	}
 
 	err := c.createConnection()
 
+	t := time.NewTicker(1 * time.Second)
+
+	// create the scheduler thread and connection handling logic
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				// ensure we've cancelled the worker context
+				cancel()
+				for {
+					// check if all the threads have cancelled, the above context being cancelled
+					// would've triggered the worker context being cancelled
+					if c.numberOfActualThreads() != 0 {
+						log.Infof("waiting on %d workers ...", c.numberOfActualThreads())
+						// TODO(jaredallard): we could probably make this a bit better by using channels across the workers
+						time.Sleep(1 * time.Second)
+						continue
+					}
+
+					ourCancel()
+					return
+				}
+			case <-t.C:
+				// handle creating the worker threads
+				for queueName, num := range c.workerThreads {
+					// if we don't have the desired capacity, create new ones
+					if num != c.actualThreads[queueName] {
+						log.Infof("creating thread '%v'", queueName)
+						if err := c.createProcessor(queueName); err != nil {
+							log.Errorf("failed to create thread: %v", err)
+
+							// it'll be recreated
+							continue
+						}
+
+						c.actualThreads[queueName]++
+					}
+				}
+
+				// if connection is still alive, then we skip this
+				if !c.connection.IsClosed() {
+					continue
+				}
+
+				// we never gonna give you up, never gonna let you down
+				_ = backoff.Retry(func() error {
+					err := c.createConnection()
+					if err == nil {
+						// if we had no error creating a connection, then we should cancel all the worker
+						// threads and recreate them
+						cancel()
+						c.workerContext, cancel = context.WithCancel(ctx)
+					}
+
+					return err
+				}, backoff.NewExponentialBackOff())
+			}
+		}
+	}()
+
 	return &c, err
 }
 
-func (c *Client) createConnection() error {
-	// lock the mutex before we check the state, if we have a new valid connection
-	// we just no-op
-	c.connmutex.Lock()
-	defer c.connmutex.Unlock()
-
-	if c.connection != nil {
-		if c.connection.IsClosed() {
-			c.connection.Close()
-		} else {
-			// refuse to modify a valid connection, instead it'll just use the valid one
-			return nil
-		}
+func (c *Client) createProcessor(queueName string) error {
+	rmqChan, err := c.getChannel()
+	if err != nil {
+		return err
 	}
 
+	ch, err := rmqChan.Consume(queueName, "", false, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+
+	// pipe from this consumer into multiplexed channel
+	go func() {
+		defer rmqChan.Close()
+
+		for {
+			select {
+			case msg := <-ch:
+				// skip invalid messages, i.e bad data
+				if msg.Body == nil {
+					continue
+				}
+
+				d, err := NewDelivery(c.ctx, msg, rmqChan)
+				if err != nil {
+					continue
+				}
+
+				// publish the message onto our "combined" queue
+				c.workerMultiplexer[queueName] <- d
+
+			case <-c.workerContext.Done():
+				log.Infof("worker on queue '%s' shutting down", queueName)
+				c.actualThreads[queueName]--
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (c *Client) numberOfTotalThreads() int {
+	total := 0
+	for _, i := range c.workerThreads {
+		total += i
+	}
+
+	return total
+}
+
+func (c *Client) numberOfActualThreads() int {
+	total := 0
+	for _, i := range c.actualThreads {
+		total += i
+	}
+
+	return total
+}
+
+func (c *Client) createConnection() error {
 	// TODO(jaredallard): maybe give up at a certain point?
-	_ = backoff.Retry(func() error {
+	err := backoff.Retry(func() error {
 		var err error
 
 		fqendpoint := fmt.Sprintf("amqp://%s:%s@%s", os.Getenv("RABBITMQ_USERNAME"), os.Getenv("RABBITMQ_PASSWORD"), c.endpoint)
@@ -100,6 +227,10 @@ func (c *Client) createConnection() error {
 
 		return nil
 	}, backoff.NewExponentialBackOff())
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -205,82 +336,13 @@ func (c *Client) Publish(topic string, body []byte) error {
 	return err
 }
 
-// createProcessor creates a job processor on a given queue
-func (c *Client) createProcessor(
-	queue string,
-	multiplexer chan *Delivery, errChan chan error,
-	wg *sync.WaitGroup,
-) error {
-	rmqChan, err := c.getChannel()
-	if err != nil {
-		return err
-	}
-
-	ch, err := rmqChan.Consume(queue, "", false, false, false, false, nil)
-	if err != nil {
-		return err
-	}
-
-	tick := time.NewTicker(5 * time.Second)
-
-	// pipe from this consumer into multiplexed channel
-	go func() {
-		for {
-			select {
-			// TODO(jaredallard): refactor this to have a single connection "watcher"
-			// doing one per processor has required crazy mutex logic
-			case <-tick.C:
-				c.connmutex.Lock()
-				if c.connection.IsClosed() {
-					c.connmutex.Unlock()
-					// close the channel, we don't care about it anymore anyways
-					rmqChan.Close()
-
-					errChan <- fmt.Errorf("connection died")
-					err := c.createProcessor(queue, multiplexer, errChan, wg)
-					if err != nil {
-						errChan <- ErrorReconnecting
-						continue
-					}
-
-					errChan <- fmt.Errorf("processor '%s' reconnected", queue)
-
-					// we terminate because the new processor is taking over
-					tick.Stop()
-					return
-				} else {
-					c.connmutex.Unlock()
-				}
-			case msg := <-ch:
-				log.Infof("got message %v", msg)
-				// skip invalid messages, i.e bad data
-				if msg.Body == nil {
-					continue
-				}
-
-				d, err := NewDelivery(c.ctx, msg, rmqChan)
-				if err != nil {
-					errChan <- err
-					continue
-				}
-
-				// publish the message onto our "combined" queue
-				multiplexer <- d
-
-			case <-c.ctx.Done():
-				errChan <- c.ctx.Err()
-				tick.Stop()
-				wg.Done()
-				return
-			}
-		}
-	}()
-
-	return nil
+// Done waits until this client completely closes
+func (c *Client) Done() {
+	<-c.done.Done()
 }
 
 // Consume from a RabbitMQ queue
-func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
+func (c *Client) Consume(topic string) (msgs <-chan *Delivery, errChan <-chan error, err error) {
 	if err := c.ensureExchange(topic); err != nil {
 		return nil, nil, ErrorEnsureExchange
 	}
@@ -288,34 +350,13 @@ func (c *Client) Consume(topic string) (<-chan *Delivery, <-chan error, error) {
 		return nil, nil, ErrorEnsureConsumerQueues
 	}
 
-	var wg sync.WaitGroup
-
 	multiplexer := make(chan *Delivery)
-	errChan := make(chan error)
 
-	wg.Add(c.numConsumerQueues)
 	for i := 0; i != c.numConsumerQueues; i++ {
 		queue := c.getRk(topic, i)
-		if err := c.createProcessor(queue, multiplexer, errChan, &wg); err != nil {
-			wg.Done()
-			return nil, nil, errors.Wrap(err, "failed to create initial processor")
-		}
+		c.workerThreads[queue]++
+		c.workerMultiplexer[queue] = multiplexer
 	}
 
-	// wait for our processor threads to finish
-	// TODO(jaredallard): need to add logic to ensure that these are always running
-	go func() {
-		wg.Wait()
-
-		// we ignore connection close errors ultimately
-		if err := c.connection.Close(); err != nil {
-			errChan <- err
-		}
-
-		// all the threads have closed, close our channels now
-		close(errChan)
-		close(multiplexer)
-	}()
-
-	return multiplexer, errChan, nil
+	return multiplexer, make(chan error), nil
 }

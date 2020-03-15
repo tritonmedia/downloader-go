@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/minio/minio-go/v6"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tritonmedia/downloader-go/internal/downloader"
@@ -67,35 +65,10 @@ func main() {
 	}
 	log.Infoln("connected")
 
-	var ssl bool
-	endpoint := os.Getenv("S3_ENDPOINT")
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		log.Fatalf("failed to parse minio endpoint as a URL: %v", err)
-	}
-
-	if u.Scheme == "https" {
-		log.Infof("minio: enabled TLS")
-		ssl = true
-	}
-
-	m, err := minio.New(
-		u.Host,
-		os.Getenv("S3_ACCESS_KEY"),
-		os.Getenv("S3_SECRET_KEY"),
-		ssl,
-	)
-	if err != nil {
-		log.Fatalf("failed to create minio (s3) client: %v", err)
-	}
-
 	msgs, errChan, err := client.Consume("v1.download")
 	if err != nil {
 		log.Fatalf("failed to consume from queues: %v", err)
 	}
-
-	// for now
-	_ = m
 
 	// this is a bad pattern, but since we're just looking to bubble up errors
 	// I'm ok with this
@@ -194,7 +167,7 @@ func main() {
 	<-ctx.Done()
 
 	// wait for the message processor to stop
-	<-msgs
+	client.Done()
 
 	// wait for shutdown
 	log.Info("finished shutdown")
