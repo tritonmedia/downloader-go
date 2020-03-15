@@ -134,18 +134,16 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 					continue
 				}
 
-				// we never gonna give you up, never gonna let you down
-				_ = backoff.Retry(func() error {
-					err := c.createConnection()
-					if err == nil {
-						// if we had no error creating a connection, then we should cancel all the worker
-						// threads and recreate them
-						cancel()
-						c.workerContext, cancel = context.WithCancel(ctx)
-					}
+				// we try to recreate the connection
+				err := c.createConnection()
+				if err == nil {
+					// if we had no error creating a connection, then we should cancel all the worker
+					// threads and recreate them
+					cancel()
 
-					return err
-				}, backoff.NewExponentialBackOff())
+					// recreate the worker context, since the old one is finished now
+					c.workerContext, cancel = context.WithCancel(ctx)
+				}
 			}
 		}
 	}()
