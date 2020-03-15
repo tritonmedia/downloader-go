@@ -86,7 +86,7 @@ func (c *Client) UploadFiles(ctx context.Context, mediaId string, baseDir string
 		encodedName := base64.StdEncoding.EncodeToString([]byte(filepath.Base(fileName)))
 
 		log.Infof("starting upload of file '%v'", encodedName)
-		if _, err := c.s3client.PutObjectWithContext(ctx, c.bucket, filepath.Join(mediaId, encodedName), f, stats.Size(), minio.PutObjectOptions{}); err != nil {
+		if _, err := c.s3client.PutObjectWithContext(ctx, c.bucket, filepath.Join(mediaId, "original/", encodedName), f, stats.Size(), minio.PutObjectOptions{}); err != nil {
 			log.Errorf("failed to upload file: %v", err)
 			continue
 		}
