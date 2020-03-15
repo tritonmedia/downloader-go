@@ -10,6 +10,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/minio/minio-go/v6"
@@ -125,6 +126,7 @@ func main() {
 
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
+	// TODO(jaredallard): nack messages by default if "continued"
 	go func() {
 		for msg := range msgs {
 			var job api.Download
@@ -154,6 +156,23 @@ func main() {
 
 			if err := uploader.UploadFiles(ctx, job.Media.Id, dlDir, files); err != nil {
 				log.Errorf("failed to upload media files: %v", err)
+				continue
+			}
+
+			log.Infof("creating v1.convert message")
+			convertMsg := api.Convert{
+				CreatedAt: time.Now().String(),
+				Media:     job.Media,
+			}
+
+			b, err := proto.Marshal(&convertMsg)
+			if err != nil {
+				log.Errorf("failed to marshal convert payload: %v", err)
+				continue
+			}
+
+			if err := client.Publish("v1.convert", b); err != nil {
+				log.Errorf("failed to publish message: %v", err)
 				continue
 			}
 
