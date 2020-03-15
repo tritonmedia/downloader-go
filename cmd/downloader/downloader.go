@@ -2,25 +2,45 @@ package main
 
 import (
 	"context"
-	"net/url"
+	"flag"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/minio/minio-go/v6"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/tritonmedia/downloader-go/internal/downloader"
 	"github.com/tritonmedia/downloader-go/internal/downloader/http"
 	"github.com/tritonmedia/downloader-go/internal/downloader/torrent"
+	"github.com/tritonmedia/downloader-go/internal/process"
 	"github.com/tritonmedia/downloader-go/internal/rabbitmq"
+	"github.com/tritonmedia/downloader-go/internal/uploader"
 	api "github.com/tritonmedia/tritonmedia.go/pkg/proto"
 )
 
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Warnf("failed to create cpu profile file: %v", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Warnf("failed to start cpu profiling: %v", err)
+		} else {
+			log.Info("started cpu profiler")
+			defer pprof.StopCPUProfile()
+		}
+	}
 
 	if strings.ToLower(os.Getenv("LOG_LEVEL")) == "debug" {
 		log.SetReportCaller(true)
@@ -45,35 +65,10 @@ func main() {
 	}
 	log.Infoln("connected")
 
-	var ssl bool
-	endpoint := os.Getenv("S3_ENDPOINT")
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		log.Fatalf("failed to parse minio endpoint as a URL: %v", err)
-	}
-
-	if u.Scheme == "https" {
-		log.Infof("minio: enabled TLS")
-		ssl = true
-	}
-
-	m, err := minio.New(
-		u.Host,
-		os.Getenv("S3_ACCESS_KEY"),
-		os.Getenv("S3_SECRET_KEY"),
-		ssl,
-	)
-	if err != nil {
-		log.Fatalf("failed to create minio (s3) client: %v", err)
-	}
-
 	msgs, errChan, err := client.Consume("v1.download")
 	if err != nil {
 		log.Fatalf("failed to consume from queues: %v", err)
 	}
-
-	// for now
-	_ = m
 
 	// this is a bad pattern, but since we're just looking to bubble up errors
 	// I'm ok with this
@@ -97,8 +92,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	uploader, err := uploader.NewUploader("triton-staging")
+	if err != nil {
+		log.Fatal(errors.Wrap(err, "failed to create uploader"))
+	}
+
 	// TODO(jaredallard): we might want to be able to add more goroutines for this, but I
 	// need to learn more about the scheduling system first
+	// TODO(jaredallard): nack messages by default if "continued"
 	go func() {
 		for msg := range msgs {
 			var job api.Download
@@ -112,12 +113,44 @@ func main() {
 
 			log.WithField("job", job).Infof("got message")
 
-			if err := downloader.Download(ctx, job.Media.Id, job.Media.SourceURI); err != nil {
+			dlDir, err := downloader.Download(ctx, job.Media.Id, job.Media.SourceURI)
+			if err != nil {
 				log.Errorf("failed to download torrent: %v", err)
 				continue
 			}
 
-			log.Info("finished download")
+			files, err := process.Dir(dlDir)
+			if err != nil {
+				log.Errorf("failed to find media files: %v", err)
+				continue
+			}
+
+			log.Infof("found %d files", len(files))
+
+			if err := uploader.UploadFiles(ctx, job.Media.Id, dlDir, files); err != nil {
+				log.Errorf("failed to upload media files: %v", err)
+				continue
+			}
+
+			log.Infof("creating v1.convert message")
+			convertMsg := api.Convert{
+				CreatedAt: time.Now().String(),
+				Media:     job.Media,
+			}
+
+			b, err := proto.Marshal(&convertMsg)
+			if err != nil {
+				log.Errorf("failed to marshal convert payload: %v", err)
+				continue
+			}
+
+			if err := client.Publish("v1.convert", b); err != nil {
+				log.Errorf("failed to publish message: %v", err)
+				continue
+			}
+
+			log.WithField("job", job).Infof("finished processing")
+			msg.Ack()
 		}
 	}()
 
@@ -134,7 +167,7 @@ func main() {
 	<-ctx.Done()
 
 	// wait for the message processor to stop
-	<-msgs
+	client.Done()
 
 	// wait for shutdown
 	log.Info("finished shutdown")

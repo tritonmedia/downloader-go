@@ -30,6 +30,13 @@ func TestDir(t *testing.T) {
 			want: []string{filepath.Join(testdataDir, "movie/movie.mkv")},
 		},
 		{
+			name: "should find a movie in a top level directory",
+			args: args{
+				path: filepath.Join(testdataDir, "movie-tld"),
+			},
+			want: []string{filepath.Join(testdataDir, "movie-tld/movie/movie.mkv")},
+		},
+		{
 			name: "should find files in sub directories",
 			args: args{
 				path: filepath.Join(testdataDir, "seasons-subdir"),

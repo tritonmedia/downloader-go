@@ -11,3 +11,8 @@ bin/
 downloading/
 
 .DS_Store
+
+# debug and profiling
+__debug_bin
+*.prof
+tmp/
