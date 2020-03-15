@@ -134,13 +134,12 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 					continue
 				}
 
+				// cancel the worker context so that all the existing workers stop working.
+				cancel()
+
 				// we try to recreate the connection
 				err := c.createConnection()
 				if err == nil {
-					// if we had no error creating a connection, then we should cancel all the worker
-					// threads and recreate them
-					cancel()
-
 					// recreate the worker context, since the old one is finished now
 					c.workerContext, cancel = context.WithCancel(ctx)
 				}
