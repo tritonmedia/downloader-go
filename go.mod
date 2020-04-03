@@ -5,7 +5,7 @@ go 1.13
 require (
 	github.com/anacrolix/torrent v1.14.0
 	github.com/cavaliercoder/grab v2.0.0+incompatible
-	github.com/cenkalti/backoff/v4 v4.0.0
+	github.com/cenkalti/backoff/v4 v4.0.2
 	github.com/gogo/protobuf v1.3.1
 	github.com/minio/minio-go/v6 v6.0.49
 	github.com/pkg/errors v0.9.1
