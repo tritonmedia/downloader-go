@@ -7,7 +7,7 @@ require (
 	github.com/cavaliercoder/grab v2.0.0+incompatible
 	github.com/cenkalti/backoff/v4 v4.0.0
 	github.com/gogo/protobuf v1.3.1
-	github.com/minio/minio-go/v6 v6.0.49
+	github.com/minio/minio-go/v6 v6.0.55
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/common v0.9.1
 	github.com/sirupsen/logrus v1.5.0
