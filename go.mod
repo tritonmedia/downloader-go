@@ -3,7 +3,7 @@ module github.com/tritonmedia/downloader-go
 go 1.13
 
 require (
-	github.com/anacrolix/torrent v1.14.0
+	github.com/anacrolix/torrent v1.15.2
 	github.com/cavaliercoder/grab v2.0.0+incompatible
 	github.com/cenkalti/backoff/v4 v4.0.0
 	github.com/gogo/protobuf v1.3.1
