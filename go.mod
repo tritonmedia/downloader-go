@@ -10,7 +10,7 @@ require (
 	github.com/minio/minio-go/v6 v6.0.49
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/common v0.9.1
-	github.com/sirupsen/logrus v1.5.0
+	github.com/sirupsen/logrus v1.6.0
 	github.com/streadway/amqp v0.0.0-20200108173154-1c71cc93ed71
 	github.com/tritonmedia/tritonmedia.go v1.0.2
 	golang.org/x/net v0.0.0-20200202094626-16171245cfb2 // indirect
