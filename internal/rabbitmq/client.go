@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hako/durafmt"
 	"github.com/pkg/errors"
 	"github.com/streadway/amqp"
 
@@ -17,6 +18,7 @@ import (
 )
 
 // Client is a RabbitMQ client
+// TODO(jaredallard): all of these maps :(
 type Client struct {
 	ctx context.Context
 
@@ -44,6 +46,9 @@ type Client struct {
 	// map[queueName]numberOfWorkers
 	actualThreads map[string]int
 
+	// publisherThreads is the number of publisher threads running
+	publisherThreads uint
+
 	// used to signify to external callers that we're done
 	done context.Context
 
@@ -55,6 +60,20 @@ type Client struct {
 
 	// prefetch
 	prefetch int64
+
+	// messageChan is a channel for queuing messages in memory
+	messagesChan chan *MessageQueued
+}
+
+type MessageQueued struct {
+	// AMQP topic to publish on
+	Topic string
+
+	// Message is the AMQP message object
+	Message amqp.Publishing
+
+	// Backoff is set when an error has occurred, and is modified
+	Backoff uint
 }
 
 var (
@@ -84,6 +103,7 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 		actualThreads:     make(map[string]int),
 		done:              ourContext,
 		workerMultiplexer: make(map[string]chan *Delivery),
+		messagesChan:      make(chan *MessageQueued),
 		prefetch:          10,
 		numConsumerQueues: 2,
 	}
@@ -109,6 +129,10 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 						continue
 					}
 
+					if err := c.connection.Close(); err != nil {
+						log.Warnf("failed to close connection gracefully: %v", err)
+					}
+
 					ourCancel()
 					return
 				}
@@ -127,6 +151,18 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 
 						c.actualThreads[queueName]++
 					}
+				}
+
+				// ensure we have at least one publisher running
+				if c.publisherThreads < 1 {
+					if err := c.createPublisher(); err != nil {
+						log.Errorf("failed to create publisher thread: %v", err)
+
+						// recreate it later
+						continue
+					}
+
+					c.publisherThreads++
 				}
 
 				// if connection is still alive, then we skip this
@@ -150,6 +186,59 @@ func NewClient(ctx context.Context, endpoint string) (*Client, error) {
 	return &c, err
 }
 
+func (c *Client) createPublisher() error {
+	rmqChan, err := c.getChannel()
+	if err != nil {
+		return err
+	}
+
+	log.Infof("publisher created")
+
+	// pipe from this consumer into multiplexed channel
+	go func() {
+		defer rmqChan.Close()
+
+		for {
+			select {
+			case msg := <-c.messagesChan:
+				log.Infof("processing publish")
+
+				if msg.Backoff != 0 {
+					wait := time.Millisecond * time.Duration(msg.Backoff)
+					log.Infof("retrying message in %s", durafmt.Parse(wait).String())
+					// HACK: this should be done in deadletter queues and not in the client
+					time.Sleep(wait)
+				}
+
+				rkIndex := c.lastPublishRk[msg.Topic]
+				rk := c.getRk(msg.Topic, rkIndex)
+
+				c.rkmutex.Lock()
+				c.lastPublishRk[msg.Topic]++
+				if c.lastPublishRk[msg.Topic] == c.numConsumerQueues {
+					c.lastPublishRk[msg.Topic] = 0
+				}
+				c.rkmutex.Unlock()
+
+				log.Infof("published message on topic %s", msg.Topic)
+				err := rmqChan.Publish(msg.Topic, rk, false, false, msg.Message)
+				if err != nil {
+					msg.Backoff = msg.Backoff ^ 2
+
+					// push it back onto the queue
+					c.messagesChan <- msg
+				}
+			case <-c.workerContext.Done():
+				log.Infof("publisher is terminated")
+				c.publisherThreads--
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
 func (c *Client) createProcessor(queueName string) error {
 	rmqChan, err := c.getChannel()
 	if err != nil {
@@ -160,6 +249,7 @@ func (c *Client) createProcessor(queueName string) error {
 	if err != nil {
 		return err
 	}
+	log.Infof("worker on queue '%s' started", queueName)
 
 	// pipe from this consumer into multiplexed channel
 	go func() {
@@ -182,7 +272,7 @@ func (c *Client) createProcessor(queueName string) error {
 				c.workerMultiplexer[queueName] <- d
 
 			case <-c.workerContext.Done():
-				log.Infof("worker on queue '%s' shutting down", queueName)
+				log.Infof("worker on queue '%s' shut down", queueName)
 				c.actualThreads[queueName]--
 				return
 			}
@@ -282,11 +372,6 @@ func (c *Client) getChannel() (*amqp.Channel, error) {
 	return channel, err
 }
 
-// Channel returns a raw RabbitMQ channel
-func (c *Client) Channel() (*amqp.Channel, error) {
-	return c.getChannel()
-}
-
 // getRK gets the expected queue and rk name for a numberic consumer
 func (c *Client) getRk(topic string, rkIndex int) string {
 	return fmt.Sprintf("%s-%d", topic, rkIndex)
@@ -299,38 +384,16 @@ func (c *Client) SetPrefetch(prefetch int64) {
 
 // Publish a message to an exchange, must be a serialized format
 func (c *Client) Publish(topic string, body []byte) error {
-	aChan, err := c.getChannel()
-	if err != nil {
-		return err
+	c.messagesChan <- &MessageQueued{
+		Backoff: 0,
+		Topic:   topic,
+		Message: amqp.Publishing{
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "application/octet-stream",
+			Body:         body,
+		},
 	}
-	defer aChan.Close()
-
-	if err := c.ensureExchange(topic); err != nil {
-		return ErrorEnsureExchange
-	}
-	if err := c.ensureConsumerQueues(topic); err != nil {
-		return ErrorEnsureConsumerQueues
-	}
-
-	rkIndex := c.lastPublishRk[topic]
-	rk := c.getRk(topic, rkIndex)
-
-	c.rkmutex.Lock()
-	c.lastPublishRk[topic]++
-	if c.lastPublishRk[topic] == c.numConsumerQueues {
-		c.lastPublishRk[topic] = 0
-	}
-	c.rkmutex.Unlock()
-
-	// TODO(jaredallard): queue messages in memory
-	if err := aChan.Publish(topic, rk, false, false, amqp.Publishing{
-		DeliveryMode: amqp.Persistent,
-		ContentType:  "application/octet-stream",
-		Body:         body,
-	}); err == amqp.ErrClosed {
-		return c.Publish(topic, body)
-	}
-	return err
+	return nil
 }
 
 // Done waits until this client completely closes

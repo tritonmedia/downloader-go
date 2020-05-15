@@ -51,9 +51,6 @@ func NewDelivery(ctx context.Context, delivery amqp.Delivery, channel *amqp.Chan
 	}, nil
 }
 
-// TODO(jaredallard): add support for queueing ack/nack/etc events in case
-// the rabbitmq instance has died
-
 // Ack acks the message
 func (d *Delivery) Ack() error {
 	return d.Delivery.Ack(false)
