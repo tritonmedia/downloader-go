@@ -13,6 +13,6 @@ RUN go mod download
 COPY . /src/app
 RUN make CGO_ENABLED=0
 
-FROM alpine:3.11
+FROM alpine:3.13
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /src/app/bin/downloader /usr/bin/downloader
