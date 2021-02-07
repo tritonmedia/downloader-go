@@ -10,7 +10,7 @@ require (
 	github.com/hako/durafmt v0.0.0-20191009132224-3f39dc1ed9f4
 	github.com/minio/minio-go/v6 v6.0.55
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.6.0
+	github.com/sirupsen/logrus v1.7.0
 	github.com/streadway/amqp v0.0.0-20200108173154-1c71cc93ed71
 	github.com/tritonmedia/tritonmedia.go v1.0.2
 	golang.org/x/net v0.0.0-20200513185701-a91f0712d120 // indirect
