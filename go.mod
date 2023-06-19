@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/anacrolix/torrent v1.15.2
-	github.com/cavaliercoder/grab v2.0.0+incompatible
+	github.com/cavaliercoder/grab v3.0.1+incompatible
 	github.com/cenkalti/backoff/v4 v4.0.2
 	github.com/gogo/protobuf v1.3.1
 	github.com/hako/durafmt v0.0.0-20191009132224-3f39dc1ed9f4
